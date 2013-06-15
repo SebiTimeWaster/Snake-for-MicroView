@@ -23,7 +23,7 @@ void loop() {
   digitalWrite(ledPin, ledState);
 }
 
-bool debounce(int pin, int* pCurrentLevel, long* pLastDebounceTime) {
+bool debounce(int pin, int *pCurrentLevel, long *pLastDebounceTime) {
   long now = millis();
   int currentLevel = digitalRead(pin);
 
