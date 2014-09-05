@@ -1,4 +1,4 @@
-arduino (snake game)
+Snake-for-MicroView
 =======
 
-goal: adapt it for the new microview
+Goal: Adapt the existing game to the new microview.
