@@ -1,209 +1,183 @@
-#define CELL(row, col) (row)*numCols + (col)
+#include <MicroView.h>
 
-const byte rowPins[] = { 2, 3, 4, 5, 17, 16, 15, 14 };
-const byte colPins[] = { 6, 7, 8, 9, 10, 11, 12, 13 };
-const byte potPin = 5;
-const byte numRows = sizeof(rowPins) / sizeof(*rowPins);
-const byte numCols = sizeof(colPins) / sizeof(*colPins);
-const int bufferSize = numCols*numRows;
+// compiler constants defining game parameters
+#define screenSizeX     64
+#define screenSizeY     48
+#define bufferSize     768 // screenSizeX * screenSizeY / 4 (-2 bit, handled by pointer)
+#define tickDelay       50 // game tick = delay in ms / 2
+#define pointsPerApple  50 // how much longer the snake will become per apple
 
-const int delta[4] = { 1, numCols, -1, -numCols };
-const int maxDelta = sizeof(delta) / sizeof(*delta) - 1;
+// global vars holding game status
+int  snakeHeadPosX;
+int  snakeHeadPosY;
+int  snakeHeadDir;
+int  snakeHeadPointer;
+int  snakeTailPosX;
+int  snakeTailPosY;
+int  snakeTailDir;
+int  snakeTailPointer;
+int  applePosX;
+int  applePosY;
+int  applePoints;
+byte snakeMovements[bufferSize] = {0};
+byte gamestatus = 0; // 0=running, 1=lost (collision), 2=won (very unlikely)
+bool isPlayer = false;
 
-const int tick = 75;
-int ticks;
-
-const int leftThreshold = 600;
-const int rightThreshold = 900;
-
-bool screen[bufferSize];
-
-int snake[bufferSize];
-int *pSnakeHead, *pSnakeTail;
-int curDelta;
-
-int apple;
-
-long nextTick;
-int playing;
+// screen buffer pointer
+uint8_t *screenBuffer;
 
 void setup() {
-  byte row, col;
-
-  for (row = 0; row < numRows; row++) {
-    pinMode(rowPins[row], OUTPUT);
-  }
-
-  for (col = 0; col < numCols; col++) {
-    pinMode(colPins[col], OUTPUT);
-    digitalWrite(colPins[col], HIGH);
-  }
-
-  Serial.begin(9600);
-
-  initScreen();
-  initSnake();
-
-  initRandom();
-  initApple();
-
-  ticks = 0;
-  nextTick = tick;
-  playing = true;
-}
-
-void initScreen() {
-  byte i;
-  for (i = 0; i < bufferSize; i++) {
-    screen[i] = LOW;
-  }
-}
-
-void initApple() {
-  int i;
-  for (i = 0; i < 10; i++) {
-    apple = random(bufferSize);
-    if (screen[apple] == HIGH) continue;
-
-    screen[apple] = HIGH;
-    break;
-  }
-
-  // TODO: restart?
-}
-
-void initSnake() {
-  snake[0] = CELL(3, 3);
-  snake[1] = CELL(3, 4);
-  pSnakeTail = snake;
-  pSnakeHead = snake + 1;
-  curDelta = 0;
-
-  screen[*pSnakeHead] = HIGH;
-  screen[*pSnakeTail] = HIGH;
-}
-
-void initRandom() {
-  int seed = analogRead(potPin);
-  randomSeed(seed);
-  Serial.print("seed: ");
-  Serial.println(seed);
+  // init random generator
+  randomSeed(analogRead(0));
+  // init microview library
+  uView.begin();
+  uView.clear(ALL);
+  uView.clear(PAGE);
+  screenBuffer = uView.getScreenBuffer();
+  // init game
+  initGame();
 }
 
 void loop() {
-  nextTurn();
-  refreshScreen();
-}
-
-void nextTurn() {
-  long now = millis();
-  if (now > nextTick) {
-    if (playing) {
-      screen[*pSnakeHead] = ticks % 2 == 0 ? HIGH : LOW;
-      screen[apple] = ticks % 5 > 0 ? HIGH : LOW;
-      if (ticks % 10 == 0) {
-        int input = analogRead(potPin);
-        if (input < leftThreshold) {
-          turnLeft();
-        }
-        else if (input > rightThreshold) {
-          turnRight();
-        }
-
-        if (collides()) {
-          playing = false;
-        }
-        else {
-          crawl();
-        }
-      }
+  if(gamestatus == 0) tick();
+  if(gamestatus == 1) {
+    uView.rectFill(2, 14, 60, 20, BLACK, NORM);
+    uView.setFontType(1);
+    uView.setCursor(6,18);
+    uView.print("LOOSER");
+    uView.rect(4, 16, 56, 16);
+    uView.display();
+    for(int x = 0; x < 10; x++) {
+      delay(tickDelay * 4);
+      uView.invert(true);
+      delay(tickDelay * 4);
+      uView.invert(false);
     }
-    else {
-      if (ticks % 10 == 0) {
-        initScreen();
-        initSnake();
-        initApple();
-        playing = true;
-      }
-      else {
-        int *p = pSnakeTail;
-        while (true) {
-          screen[*p] = ticks % 2 == 0 ? HIGH : LOW;
-          if (p == pSnakeHead) break;
-
-          p++;
-          if (p > snake + bufferSize) {
-            p = snake;
-          }
-        }
-      }
-    }
-
-    nextTick += tick;
-    ticks++;
-
-    Serial.println(analogRead(potPin));
+    gamestatus = 0;
+    initGame();
+  }
+  if(gamestatus == 2) {
+    // cannot be, cheater!
   }
 }
 
-bool collides() {
-  int newHeadPos = *pSnakeHead + delta[curDelta];
-  return (newHeadPos < 0 || newHeadPos >= bufferSize
-         || (newHeadPos % numCols) != (*pSnakeHead % numCols)
-             && (newHeadPos / numCols) != (*pSnakeHead / numCols)
-         || screen[newHeadPos] == HIGH && newHeadPos != apple);
-}
-
-void turnRight() {
-  curDelta++;
-  if (curDelta > maxDelta) {
-    curDelta = 0;
+void tick() {
+  delay(tickDelay);
+  uView.pixel(applePosX, applePosY, BLACK, NORM);
+  uView.display();
+  delay(tickDelay);
+  // get last executed movements
+  snakeHeadDir = getMovement(snakeHeadPointer);
+  snakeTailDir = getMovement(snakeTailPointer);
+  // move and draw tail
+  if(applePoints == 0) {
+    uView.pixel(snakeTailPosX, snakeTailPosY, BLACK, NORM);
+    moveInDirection(&snakeTailPosX, &snakeTailPosY, snakeTailDir);
+    changeValue(&snakeTailPointer, 1, bufferSize - 1);
+  } else applePoints--;
+  // move snake
+  if(!isPlayer) {
+    autoPilot();
+    // check if user pressed key
+  } else {
+    // check userinput
   }
-}
-
-void turnLeft() {
-  curDelta--;
-  if (curDelta < 0) {
-    curDelta = maxDelta;
-  }
-}
-
-void crawl() {
-  int pos;
-  pos = *pSnakeHead;
-
-  pSnakeHead++;
-  if (pSnakeHead >= snake + bufferSize) {
-    pSnakeHead = snake;
-  }
-
-  *pSnakeHead = pos + delta[curDelta];
-
-  screen[*pSnakeHead] = HIGH;
-
-  if (*pSnakeHead == apple) {
-    initApple();
-  }
-  else {
-    screen[*pSnakeTail] = LOW;
-
-    pSnakeTail++;
-    if (pSnakeTail >= snake + bufferSize) {
-      pSnakeTail = snake;
+  // move and draw head
+  moveInDirection(&snakeHeadPosX, &snakeHeadPosY, snakeHeadDir);
+  checkCollision();
+  if(gamestatus == 0) {
+    uView.pixel(snakeHeadPosX, snakeHeadPosY);
+    changeValue(&snakeHeadPointer, 1, bufferSize - 1);
+    setMovement(snakeHeadPointer, snakeHeadDir);
+    if(snakeHeadPosX == applePosX && snakeHeadPosY == applePosY) {
+      applePoints += pointsPerApple;
+      setNewApple();
     }
   }
+  // draw apple
+  uView.pixel(applePosX, applePosY);
+  uView.display();
 }
 
-void refreshScreen() {
-  byte row, col;
-  for (row = 0; row < numRows; row++) {
-    digitalWrite(rowPins[row], HIGH);
-    for (col = 0; col < numCols; col++) {
-      digitalWrite(colPins[col], !screen[CELL(row, col)]);
-      if (screen[CELL(row, col)] == HIGH) {
-        digitalWrite(colPins[col], HIGH);
-      }
-    }
-    digitalWrite(rowPins[row], LOW);
-  }
+void initGame() {
+  uView.clear(PAGE);
+  // set initial position of snake
+  snakeHeadPosX = 4;
+  snakeHeadPosY = 3;
+  snakeHeadPointer = 0;
+  snakeTailPosX = 3;
+  snakeTailPosY = 3;
+  snakeTailPointer = 0;
+  snakeMovements[0] = 0b00000000; // 3,3 to 4,3 is always first move
+  // set random apple position
+  setNewApple();
+  applePoints = 0;
+  // draw initial game screen
+  uView.pixel(3, 3);
+  uView.pixel(4, 3);
+  uView.pixel(applePosX, applePosY);
+  uView.display();
 }
+
+void checkCollision() {
+  if(snakeHeadPosX > screenSizeX - 1 || snakeHeadPosX < 0 || 
+     snakeHeadPosY > screenSizeY - 1 || snakeHeadPosY < 0) gamestatus = 1;
+  if((snakeHeadPosX != applePosX || snakeHeadPosY != applePosY) && getPixel(snakeHeadPosX, snakeHeadPosY) == 1) gamestatus = 1;
+}
+
+void autoPilot() {
+  if(snakeHeadDir == 0) {
+         if(applePosX == snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir--;
+    else if(applePosX == snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir++;
+    else if(applePosX < snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir--;
+    else if(applePosX < snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir++;
+  } else if(snakeHeadDir == 1) {
+         if(applePosY == snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir--;
+    else if(applePosY == snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir++;
+    else if(applePosY < snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir++;
+    else if(applePosY < snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir--;
+  } else if(snakeHeadDir == 2) {
+         if(applePosX == snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir++;
+    else if(applePosX == snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir--;
+    else if(applePosX > snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir++;
+    else if(applePosX > snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir--;
+  } else if(snakeHeadDir == 3) {
+         if(applePosY == snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir++;
+    else if(applePosY == snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir--;
+    else if(applePosY > snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir--;
+    else if(applePosY > snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir++;
+  }
+  if(snakeHeadDir > 3) snakeHeadDir = 0;
+  if(snakeHeadDir < 0) snakeHeadDir = 3;
+}
+
+void setNewApple() {
+  applePosX = random(screenSizeX);
+  applePosY = random(screenSizeY);
+}
+
+void moveInDirection(int *targetX, int *targetY, int dir) {
+  if(dir == 0) *targetX += 1;
+  if(dir == 1) *targetY += 1;
+  if(dir == 2) *targetX -= 1;
+  if(dir == 3) *targetY -= 1;
+}
+
+void changeValue(int *target, int value, int maximum) {
+  *target += value;
+  if(*target > maximum) *target -= maximum;
+  if(*target < 0) *target += maximum;
+}
+
+byte getMovement(int pos) {
+  return snakeMovements[pos / 4] >> pos % 4 * 2 & 3;
+}
+
+void setMovement(int pos, byte movement) {
+  snakeMovements[pos / 4] = (snakeMovements[pos / 4] & (~(3 << (pos % 4 * 2)))) | (movement << (pos % 4 * 2));
+}
+
+byte getPixel(int x, int y) {
+  return (byte)screenBuffer[x + y / 8 * 64] >> (y - y / 8 * 8) & 0x01;
+}
+
