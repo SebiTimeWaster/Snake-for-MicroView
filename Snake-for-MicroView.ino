@@ -1,11 +1,13 @@
 #include <MicroView.h>
 
 // compiler constants defining game parameters
-#define screenSizeX     64
-#define screenSizeY     48
-#define bufferSize     768 // screenSizeX * screenSizeY / 4 (-2 bit, handled by pointer)
-#define tickDelay       50 // game tick = delay in ms / 2
-#define pointsPerApple  50 // how much longer the snake will become per apple
+#define screenSizeX      64
+#define screenSizeY      48
+#define bufferSize      713 // (screenSizeX - 2) * (screenSizeY - 2) / 4 (-2 bit, handled by pointer)
+#define tickDelay       125 // game tick in ms = 8 fps (more or less)
+#define pointsPerApple   5 // how much longer the snake will become per apple
+#define looserDelay    2000 // how long to show looser screen in ms
+#define startDelay     1000 // how long to show start screen to user in ms
 
 // global vars holding game status
 int  snakeHeadPosX;
@@ -22,6 +24,9 @@ int  applePoints;
 byte snakeMovements[bufferSize] = {0};
 byte gamestatus = 0; // 0=running, 1=lost (collision), 2=won (very unlikely)
 bool isPlayer = false;
+unsigned long startTime = 0;
+long timeLeftInTick = 0;
+uint8_t appleColor = BLACK;
 
 // screen buffer pointer
 uint8_t *screenBuffer;
@@ -36,23 +41,30 @@ void setup() {
   screenBuffer = uView.getScreenBuffer();
   // init game
   initGame();
+  Serial.begin(9600);
 }
 
 void loop() {
   if(gamestatus == 0) tick();
   if(gamestatus == 1) {
-    uView.rectFill(2, 14, 60, 20, BLACK, NORM);
+    // show looser screen
+    uView.rectFill(4, 16, 56, 16, BLACK, NORM);
     uView.setFontType(1);
     uView.setCursor(6,18);
     uView.print("LOOSER");
-    uView.rect(4, 16, 56, 16);
     uView.display();
-    for(int x = 0; x < 10; x++) {
-      delay(tickDelay * 4);
-      uView.invert(true);
-      delay(tickDelay * 4);
-      uView.invert(false);
+    for(byte x = 0; x < 15; x++) {
+      delay(20);
+      uView.rect(max(3 - x, 0), 15 - x, min(58 + x * 2, 64), 18 + x * 2);
+      uView.display();
     }
+    delay(looserDelay);
+    if(isPlayer) {
+      uView.clear(PAGE);
+      // check if user pressed key else 
+      return;
+    }
+    // restart game
     gamestatus = 0;
     initGame();
   }
@@ -62,10 +74,6 @@ void loop() {
 }
 
 void tick() {
-  delay(tickDelay);
-  uView.pixel(applePosX, applePosY, BLACK, NORM);
-  uView.display();
-  delay(tickDelay);
   // get last executed movements
   snakeHeadDir = getMovement(snakeHeadPointer);
   snakeTailDir = getMovement(snakeTailPointer);
@@ -76,84 +84,97 @@ void tick() {
     changeValue(&snakeTailPointer, 1, bufferSize - 1);
   } else applePoints--;
   // move snake
-  if(!isPlayer) {
-    autoPilot();
-    // check if user pressed key
-  } else {
+  if(!isPlayer) autoPilot();
+  else {
     // check userinput
   }
-  // move and draw head
+  // move and draw head and check for collisions
   moveInDirection(&snakeHeadPosX, &snakeHeadPosY, snakeHeadDir);
   checkCollision();
   if(gamestatus == 0) {
     uView.pixel(snakeHeadPosX, snakeHeadPosY);
     changeValue(&snakeHeadPointer, 1, bufferSize - 1);
     setMovement(snakeHeadPointer, snakeHeadDir);
-    if(snakeHeadPosX == applePosX && snakeHeadPosY == applePosY) {
-      applePoints += pointsPerApple;
-      setNewApple();
-    }
   }
   // draw apple
-  uView.pixel(applePosX, applePosY);
+  appleColor = !appleColor;
+  uView.pixel(applePosX, applePosY, appleColor, NORM);
   uView.display();
+  // slack of the rest of the needed tick time
+  timeLeftInTick = tickDelay - (millis() - startTime);
+  delay(max(timeLeftInTick, 0));
+  startTime = millis();
+  // check if player wants to join game
+  if(!isPlayer) {
+    // check if user pressed key
+    // isPlayer = true;
+    // initGame();
+  }
 }
 
 void initGame() {
   uView.clear(PAGE);
   // set initial position of snake
-  snakeHeadPosX = 4;
-  snakeHeadPosY = 3;
+  snakeHeadPosX = 5;
+  snakeHeadPosY = 4;
   snakeHeadPointer = 0;
-  snakeTailPosX = 3;
-  snakeTailPosY = 3;
+  snakeTailPosX = 4;
+  snakeTailPosY = 4;
   snakeTailPointer = 0;
-  snakeMovements[0] = 0b00000000; // 3,3 to 4,3 is always first move
+  snakeMovements[0] = 0b00000000; // 4,4 to 5,4 is always first move
   // set random apple position
   setNewApple();
   applePoints = 0;
   // draw initial game screen
-  uView.pixel(3, 3);
-  uView.pixel(4, 3);
+  uView.pixel(4, 4);
+  uView.pixel(5, 4);
   uView.pixel(applePosX, applePosY);
+  uView.rect(0, 0, 64, 48);
   uView.display();
+  if(isPlayer) {
+    // give time without movement so user can adjust to new pos
+    for(byte x = 0; x < startDelay / tickDelay; x++) {
+      appleColor = !appleColor;
+      uView.pixel(applePosX, applePosY, appleColor, NORM);
+      uView.display();
+      delay(tickDelay);
+    }
+  }
+  // set first tick time measurement
+  startTime = millis();
 }
 
 void checkCollision() {
-  if(snakeHeadPosX > screenSizeX - 1 || snakeHeadPosX < 0 || 
-     snakeHeadPosY > screenSizeY - 1 || snakeHeadPosY < 0) gamestatus = 1;
-  if((snakeHeadPosX != applePosX || snakeHeadPosY != applePosY) && getPixel(snakeHeadPosX, snakeHeadPosY) == 1) gamestatus = 1;
+  if(snakeHeadPosX == applePosX && snakeHeadPosY == applePosY) {
+    applePoints += pointsPerApple;
+    setNewApple();
+    return;
+  }
+  if(getPixel(snakeHeadPosX, snakeHeadPosY)) gamestatus = 1;
 }
 
 void autoPilot() {
-  if(snakeHeadDir == 0) {
-         if(applePosX == snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir--;
-    else if(applePosX == snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir++;
-    else if(applePosX < snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir--;
-    else if(applePosX < snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir++;
-  } else if(snakeHeadDir == 1) {
-         if(applePosY == snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir--;
-    else if(applePosY == snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir++;
-    else if(applePosY < snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir++;
-    else if(applePosY < snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir--;
-  } else if(snakeHeadDir == 2) {
-         if(applePosX == snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir++;
-    else if(applePosX == snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir--;
-    else if(applePosX > snakeHeadPosX && applePosY < snakeHeadPosY) snakeHeadDir++;
-    else if(applePosX > snakeHeadPosX && applePosY > snakeHeadPosY) snakeHeadDir--;
-  } else if(snakeHeadDir == 3) {
-         if(applePosY == snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir++;
-    else if(applePosY == snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir--;
-    else if(applePosY > snakeHeadPosY && applePosX < snakeHeadPosX) snakeHeadDir--;
-    else if(applePosY > snakeHeadPosY && applePosX > snakeHeadPosX) snakeHeadDir++;
+  if(snakeHeadDir == 0 && applePosX <= snakeHeadPosX) {
+    if(applePosY >= snakeHeadPosY) changeValue(&snakeHeadDir, 1, 3);
+    else changeValue(&snakeHeadDir, -1, 3);
+  } else if(snakeHeadDir == 1 && applePosY <= snakeHeadPosY) {
+    if(applePosX <= snakeHeadPosX) changeValue(&snakeHeadDir, 1, 3);
+    else changeValue(&snakeHeadDir, -1, 3);
+  } else if(snakeHeadDir == 2 && applePosX >= snakeHeadPosX) {
+    if(applePosY <= snakeHeadPosY) changeValue(&snakeHeadDir, 1, 3);
+    else changeValue(&snakeHeadDir, -1, 3);
+  } else if(snakeHeadDir == 3 && applePosY >= snakeHeadPosY) {
+    if(applePosX >= snakeHeadPosX) changeValue(&snakeHeadDir, 1, 3);
+    else changeValue(&snakeHeadDir, -1, 3);
   }
-  if(snakeHeadDir > 3) snakeHeadDir = 0;
-  if(snakeHeadDir < 0) snakeHeadDir = 3;
 }
 
 void setNewApple() {
-  applePosX = random(screenSizeX);
-  applePosY = random(screenSizeY);
+  // TODO: should be optimized!
+  do {
+    applePosX = random(1, screenSizeX - 1);
+    applePosY = random(1, screenSizeY - 1);
+  } while(getPixel(applePosX, applePosY));
 }
 
 void moveInDirection(int *targetX, int *targetY, int dir) {
@@ -165,8 +186,8 @@ void moveInDirection(int *targetX, int *targetY, int dir) {
 
 void changeValue(int *target, int value, int maximum) {
   *target += value;
-  if(*target > maximum) *target -= maximum;
-  if(*target < 0) *target += maximum;
+  if(*target > maximum) *target -= (maximum + 1);
+  if(*target < 0) *target += (maximum + 1);
 }
 
 byte getMovement(int pos) {
