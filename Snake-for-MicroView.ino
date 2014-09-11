@@ -5,31 +5,32 @@
 #define screenSizeY      48
 #define bufferSize      713 // (screenSizeX - 2) * (screenSizeY - 2) / 4 (-2 bit, handled by pointer)
 #define tickDelay       125 // game tick in ms = 8 fps (more or less)
-#define pointsPerApple   5 // how much longer the snake will become per apple
+#define pointsPerApple    5 // how much longer the snake will become per apple
 #define looserDelay    2000 // how long to show looser screen in ms
 #define startDelay     1000 // how long to show start screen to user in ms
 
 // global vars holding game status
-int  snakeHeadPosX;
-int  snakeHeadPosY;
-int  snakeHeadDir;
-int  snakeHeadPointer;
-int  snakeTailPosX;
-int  snakeTailPosY;
-int  snakeTailDir;
-int  snakeTailPointer;
-int  applePosX;
-int  applePosY;
-int  applePoints;
-byte snakeMovements[bufferSize] = {0};
-byte gamestatus = 0; // 0=running, 1=lost (collision), 2=won (very unlikely)
-bool isPlayer = false;
-unsigned long startTime = 0;
-long timeLeftInTick = 0;
-uint8_t appleColor = BLACK;
-
-// screen buffer pointer
-uint8_t *screenBuffer;
+int           snakeHeadPosX;
+int           snakeHeadPosY;
+int           snakeHeadDir;
+int           snakeHeadPointer;
+int           snakeTailPosX;
+int           snakeTailPosY;
+int           snakeTailDir;
+int           snakeTailPointer;
+int           applePosX;
+int           applePosY;
+int           applePoints;
+byte          snakeMovements[bufferSize] = {0};
+byte          gamestatus                 = 0; // 0=running, 1=lost (collision), 2=won (very unlikely)
+bool          isPlayer                   = false;
+unsigned long startTime                  = 0;
+long          timeLeftInTick             = 0;
+uint8_t       appleColor                 = BLACK;
+volatile byte buttonPortDataTemp         = 0;
+byte          buttonPortData             = 0;
+uint8_t      *screenBuffer;
+unsigned long buttonTime                 = 0;
 
 void setup() {
   // init random generator
@@ -38,7 +39,14 @@ void setup() {
   uView.begin();
   uView.clear(ALL);
   uView.clear(PAGE);
+  // point to uView libraries internal screen buffer
   screenBuffer = uView.getScreenBuffer();
+  // attach interrupt for button press
+  attachInterrupt(0, buttonIsPressed, FALLING);
+  attachInterrupt(1, buttonIsPressed, FALLING);
+  // configure button input pins
+  pinMode(2, INPUT_PULLUP);
+  pinMode(3, INPUT_PULLUP);
   // init game
   initGame();
   Serial.begin(9600);
@@ -61,8 +69,8 @@ void loop() {
     delay(looserDelay);
     if(isPlayer) {
       uView.clear(PAGE);
-      // check if user pressed key else 
-      return;
+      if(buttonPortData == 0) return;
+      else buttonPortData = 0;
     }
     // restart game
     gamestatus = 0;
@@ -85,8 +93,10 @@ void tick() {
   } else applePoints--;
   // move snake
   if(!isPlayer) autoPilot();
-  else {
-    // check userinput
+  else if(buttonPortData > 0) {
+    if(buttonPortData == 2) changeValue(&snakeHeadDir, 1, 3);
+    if(buttonPortData == 1) changeValue(&snakeHeadDir, -1, 3);
+    buttonPortData = 0;
   }
   // move and draw head and check for collisions
   moveInDirection(&snakeHeadPosX, &snakeHeadPosY, snakeHeadDir);
@@ -105,10 +115,10 @@ void tick() {
   delay(max(timeLeftInTick, 0));
   startTime = millis();
   // check if player wants to join game
-  if(!isPlayer) {
-    // check if user pressed key
-    // isPlayer = true;
-    // initGame();
+  if(!isPlayer && buttonPortData > 0) {
+    buttonPortData = 0;
+    isPlayer = true;
+    initGame();
   }
 }
 
@@ -125,6 +135,8 @@ void initGame() {
   // set random apple position
   setNewApple();
   applePoints = 0;
+  // reset button press
+  buttonPortData = 0;
   // draw initial game screen
   uView.pixel(4, 4);
   uView.pixel(5, 4);
@@ -188,6 +200,22 @@ void changeValue(int *target, int value, int maximum) {
   *target += value;
   if(*target > maximum) *target -= (maximum + 1);
   if(*target < 0) *target += (maximum + 1);
+}
+
+void buttonIsPressed() {
+  if(millis() - buttonTime > 50) { // lock keys for 50 ms
+    buttonTime = millis();
+    buttonPortDataTemp = PIND;
+    buttonPortData = 0;
+    if(buttonPortDataTemp >> 2 & 0x01 == 0x01) buttonPortData = 1;
+    if(buttonPortDataTemp >> 3 & 0x01 == 0x01) buttonPortData = 2;
+    // sometimes the time from start of interrupt to setting the variable is enough to get no data (button bouncing)
+    while(buttonPortData == 0) {
+      buttonPortDataTemp = PIND;
+      if(buttonPortDataTemp >> 2 & 0x01 == 0x01) buttonPortData = 1;
+      if(buttonPortDataTemp >> 3 & 0x01 == 0x01) buttonPortData = 2;
+    }
+  }
 }
 
 byte getMovement(int pos) {
