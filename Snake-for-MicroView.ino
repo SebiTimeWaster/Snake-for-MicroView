@@ -1,12 +1,33 @@
+
+/*
+ * set this to true to have a bad time (or a good time, depends on your definition) ^^
+ */
+#define doItHard false
+
+
+/*
+ * Do not change anything below here unless you know what you do
+ */
 #include <MicroView.h>
 
 // compiler directives defining game parameters
-#define screenSizeX      64
-#define screenSizeY      48
-#define bufferSize      713 // (screenSizeX - 2) * (screenSizeY - 2) / 4
-#define tickDelay       125 // game tick in ms = 8 fps (more or less)
-#define pointsPerApple    5 // how much longer the snake will become per apple
-#define userDelay      1000 // how long to screens before / after user interaction
+#if doItHard
+  #define screenSizeX        64
+  #define screenSizeY        48
+  #define bufferSize        713 // (screenSizeX - 2) * (screenSizeY - 2) / 4
+  #define maxBufferLength  2850 // (screenSizeX - 2) * (screenSizeY - 2) - 2
+  #define pointsPerApple      5 // how much longer the snake will become per apple
+  #define doublePixels    false
+#else
+  #define screenSizeX        32
+  #define screenSizeY        24
+  #define bufferSize        165 // (screenSizeX - 2) * (screenSizeY - 2) / 4
+  #define maxBufferLength   658 // (screenSizeX - 2) * (screenSizeY - 2) - 2
+  #define pointsPerApple      3 // how much longer the snake will become per apple
+  #define doublePixels     true
+#endif
+#define tickDelay           125 // game tick in ms = 8 fps (more or less)
+#define userDelay          1000 // how long to screens before / after user interaction
 
 // global vars
 uint8_t      *screenBuffer;
@@ -92,16 +113,16 @@ void initGame() {
   setNewApple();
   applePoints = 0;
   // draw initial game screen
-  uView.pixel(4, 4);
-  uView.pixel(5, 4);
-  uView.pixel(applePosX, applePosY);
-  uView.rect(0, 0, 64, 48);
+  pixel(4, 4);
+  pixel(5, 4);
+  pixel(applePosX, applePosY);
+  rect(0, 0, screenSizeX, screenSizeY);
   uView.display();
   if(isPlayer) {
     // give time without movement so user can adjust to new position
     for(byte x = 0; x < userDelay / tickDelay; x++) {
       appleColor = !appleColor;
-      uView.pixel(applePosX, applePosY, appleColor, NORM);
+      pixel(applePosX, applePosY, appleColor);
       uView.display();
       delay(tickDelay);
     }
@@ -118,7 +139,7 @@ void tick() {
   snakeTailDir = getMovement(snakeTailPointer);
   // move and draw tail
   if(applePoints == 0) {
-    uView.pixel(snakeTailPosX, snakeTailPosY, BLACK, NORM);
+    pixel(snakeTailPosX, snakeTailPosY, BLACK);
     moveInDirection(&snakeTailPosX, &snakeTailPosY, snakeTailDir);
     changeValue(&snakeTailPointer, 1, bufferSize - 1);
   } else applePoints--;
@@ -133,15 +154,15 @@ void tick() {
   moveInDirection(&snakeHeadPosX, &snakeHeadPosY, snakeHeadDir);
   checkCollision();
   if(gamestatus == 0) {
-    uView.pixel(snakeHeadPosX, snakeHeadPosY);
+    pixel(snakeHeadPosX, snakeHeadPosY);
     changeValue(&snakeHeadPointer, 1, bufferSize - 1);
     setMovement(snakeHeadPointer, snakeHeadDir);
   } else {
-    uView.pixel(snakeHeadPosX, snakeHeadPosY, BLACK, NORM);
+    pixel(snakeHeadPosX, snakeHeadPosY, BLACK);
   }
   // draw apple
   appleColor = !appleColor;
-  uView.pixel(applePosX, applePosY, appleColor, NORM);
+  pixel(applePosX, applePosY, appleColor);
   uView.display();
   // slack of the rest of the needed tick time
   timeLeftInTick = tickDelay - (millis() - startTime);
@@ -159,7 +180,7 @@ void showLooserAnimation() {
   // when user presses some button, stop animation. max delay is ~120 ms, which feels instant.
   for(byte x = 0; x < 5; x++) {
     delay(userDelay / 10);
-    if(buttonDir > 0) return;
+    if(aniCounter > 1 && buttonDir > 0) return;
   }
   uView.rectFill(4, 16, 56, 16, BLACK, NORM);
   uView.setFontType(1);
@@ -171,6 +192,7 @@ void showLooserAnimation() {
     uView.rect(max(3 - x, 0), 15 - x, min(58 + x * 2, 64), 18 + x * 2);
     uView.display();
   }
+  if(aniCounter == 1) buttonDir = 0;
   if(buttonDir > 0) return;
   delay(100);
   if(buttonDir > 0) return;
@@ -218,6 +240,28 @@ void setNewApple() {
   } while(getPixel(applePosX, applePosY));
 }
 
+void rect(byte x, byte y, byte width, byte height) {
+  rect(x, y, width, height, WHITE);
+}
+
+void rect(byte x, byte y, byte width, byte height, uint8_t color) {
+  if(doublePixels) {
+    uView.rect(x * 2, y * 2, width * 2, height * 2, color, NORM);
+    uView.rect(x * 2 + 1, y * 2 + 1, width * 2 - 2, height * 2 - 2, color, NORM);
+  } else {
+    uView.rect(x, y, width, height, color, NORM);
+  }
+}
+
+void pixel(byte x, byte y) {
+  pixel(x, y, WHITE);
+}
+
+void pixel(byte x, byte y, uint8_t color) {
+  if(doublePixels) uView.rect(x * 2, y * 2, 2, 2, color, NORM);
+  else uView.pixel(x, y, color, NORM);
+}
+
 void moveInDirection(int *targetX, int *targetY, int dir) {
   if(dir == 0) *targetX += 1;
   if(dir == 1) *targetY += 1;
@@ -254,6 +298,10 @@ void setMovement(int pos, byte movement) {
 }
 
 byte getPixel(int x, int y) {
+  if(doublePixels) {
+    x *= 2;
+    y *= 2;
+  }
   return (byte)screenBuffer[x + y / 8 * 64] >> (y - y / 8 * 8) & 0x01;
 }
 
