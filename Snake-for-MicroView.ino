@@ -1,36 +1,35 @@
 #include <MicroView.h>
 
-// compiler constants defining game parameters
+// compiler directives defining game parameters
 #define screenSizeX      64
 #define screenSizeY      48
-#define bufferSize      713 // (screenSizeX - 2) * (screenSizeY - 2) / 4 (-2 bit, handled by pointer)
+#define bufferSize      713 // (screenSizeX - 2) * (screenSizeY - 2) / 4
 #define tickDelay       125 // game tick in ms = 8 fps (more or less)
 #define pointsPerApple    5 // how much longer the snake will become per apple
-#define looserDelay    2000 // how long to show looser screen in ms
-#define startDelay     1000 // how long to show start screen to user in ms
+#define userDelay      1000 // how long to screens before / after user interaction
 
-// global vars holding game status
-int           snakeHeadPosX;
-int           snakeHeadPosY;
-int           snakeHeadDir;
-int           snakeHeadPointer;
-int           snakeTailPosX;
-int           snakeTailPosY;
-int           snakeTailDir;
-int           snakeTailPointer;
-int           applePosX;
-int           applePosY;
-int           applePoints;
+// global vars
+uint8_t      *screenBuffer;
+int           snakeHeadPosX              = 0;
+int           snakeHeadPosY              = 0;
+int           snakeHeadDir               = 0;
+int           snakeHeadPointer           = 0;
+int           snakeTailPosX              = 0;
+int           snakeTailPosY              = 0;
+int           snakeTailDir               = 0;
+int           snakeTailPointer           = 0;
+int           applePosX                  = 0;
+int           applePosY                  = 0;
+int           applePoints                = 0;
 byte          snakeMovements[bufferSize] = {0};
 byte          gamestatus                 = 0; // 0=running, 1=lost (collision), 2=won (very unlikely)
 bool          isPlayer                   = false;
 unsigned long startTime                  = 0;
 long          timeLeftInTick             = 0;
 uint8_t       appleColor                 = BLACK;
-volatile byte buttonPortDataTemp         = 0;
-byte          buttonPortData             = 0;
-uint8_t      *screenBuffer;
 unsigned long buttonTime                 = 0;
+volatile byte buttonDir                  = 0;
+byte          aniCounter                 = 0;
 
 void setup() {
   // init random generator
@@ -41,84 +40,41 @@ void setup() {
   uView.clear(PAGE);
   // point to uView libraries internal screen buffer
   screenBuffer = uView.getScreenBuffer();
-  // attach interrupt for button press
-  attachInterrupt(0, buttonIsPressed, FALLING);
-  attachInterrupt(1, buttonIsPressed, FALLING);
   // configure button input pins
   pinMode(2, INPUT_PULLUP);
   pinMode(3, INPUT_PULLUP);
+  // attach interrupt for button presses
+  attachInterrupt(0, buttonRight, FALLING);
+  attachInterrupt(1, buttonLeft, FALLING);
   // init game
   initGame();
-  Serial.begin(9600);
 }
 
 void loop() {
+  // decide what to do (what status the game is in)
+  // game loop
   if(gamestatus == 0) tick();
+  // user lost
   if(gamestatus == 1) {
     // show looser screen
-    uView.rectFill(4, 16, 56, 16, BLACK, NORM);
-    uView.setFontType(1);
-    uView.setCursor(6,18);
-    uView.print("LOOSER");
-    uView.display();
-    for(byte x = 0; x < 15; x++) {
-      delay(20);
-      uView.rect(max(3 - x, 0), 15 - x, min(58 + x * 2, 64), 18 + x * 2);
-      uView.display();
-    }
-    delay(looserDelay);
-    if(isPlayer) {
-      uView.clear(PAGE);
-      if(buttonPortData == 0) return;
-      else buttonPortData = 0;
+    aniCounter++;
+    showLooserAnimation();
+    // user wants to play
+    if(buttonDir > 0) isPlayer = true;
+    else if(isPlayer) {
+      // when animation showed 10 times user does not want to play anymore
+      if(aniCounter == 10) isPlayer = false;
+      // if player show animation again
+      else return;
     }
     // restart game
+    aniCounter = 0;
     gamestatus = 0;
     initGame();
   }
+  // user won
   if(gamestatus == 2) {
     // cannot be, cheater!
-  }
-}
-
-void tick() {
-  // get last executed movements
-  snakeHeadDir = getMovement(snakeHeadPointer);
-  snakeTailDir = getMovement(snakeTailPointer);
-  // move and draw tail
-  if(applePoints == 0) {
-    uView.pixel(snakeTailPosX, snakeTailPosY, BLACK, NORM);
-    moveInDirection(&snakeTailPosX, &snakeTailPosY, snakeTailDir);
-    changeValue(&snakeTailPointer, 1, bufferSize - 1);
-  } else applePoints--;
-  // move snake
-  if(!isPlayer) autoPilot();
-  else if(buttonPortData > 0) {
-    if(buttonPortData == 2) changeValue(&snakeHeadDir, 1, 3);
-    if(buttonPortData == 1) changeValue(&snakeHeadDir, -1, 3);
-    buttonPortData = 0;
-  }
-  // move and draw head and check for collisions
-  moveInDirection(&snakeHeadPosX, &snakeHeadPosY, snakeHeadDir);
-  checkCollision();
-  if(gamestatus == 0) {
-    uView.pixel(snakeHeadPosX, snakeHeadPosY);
-    changeValue(&snakeHeadPointer, 1, bufferSize - 1);
-    setMovement(snakeHeadPointer, snakeHeadDir);
-  }
-  // draw apple
-  appleColor = !appleColor;
-  uView.pixel(applePosX, applePosY, appleColor, NORM);
-  uView.display();
-  // slack of the rest of the needed tick time
-  timeLeftInTick = tickDelay - (millis() - startTime);
-  delay(max(timeLeftInTick, 0));
-  startTime = millis();
-  // check if player wants to join game
-  if(!isPlayer && buttonPortData > 0) {
-    buttonPortData = 0;
-    isPlayer = true;
-    initGame();
   }
 }
 
@@ -135,8 +91,6 @@ void initGame() {
   // set random apple position
   setNewApple();
   applePoints = 0;
-  // reset button press
-  buttonPortData = 0;
   // draw initial game screen
   uView.pixel(4, 4);
   uView.pixel(5, 4);
@@ -144,16 +98,91 @@ void initGame() {
   uView.rect(0, 0, 64, 48);
   uView.display();
   if(isPlayer) {
-    // give time without movement so user can adjust to new pos
-    for(byte x = 0; x < startDelay / tickDelay; x++) {
+    // give time without movement so user can adjust to new position
+    for(byte x = 0; x < userDelay / tickDelay; x++) {
       appleColor = !appleColor;
       uView.pixel(applePosX, applePosY, appleColor, NORM);
       uView.display();
       delay(tickDelay);
     }
   }
+  // reset button press
+  buttonDir = 0;
   // set first tick time measurement
   startTime = millis();
+}
+
+void tick() {
+  // get last executed movements
+  snakeHeadDir = getMovement(snakeHeadPointer);
+  snakeTailDir = getMovement(snakeTailPointer);
+  // move and draw tail
+  if(applePoints == 0) {
+    uView.pixel(snakeTailPosX, snakeTailPosY, BLACK, NORM);
+    moveInDirection(&snakeTailPosX, &snakeTailPosY, snakeTailDir);
+    changeValue(&snakeTailPointer, 1, bufferSize - 1);
+  } else applePoints--;
+  // move snake
+  if(!isPlayer) autoPilot();
+  else if(buttonDir > 0) {
+    if(buttonDir == 2) changeValue(&snakeHeadDir, 1, 3);
+    if(buttonDir == 1) changeValue(&snakeHeadDir, -1, 3);
+    buttonDir = 0;
+  }
+  // move and draw head and check for collisions
+  moveInDirection(&snakeHeadPosX, &snakeHeadPosY, snakeHeadDir);
+  checkCollision();
+  if(gamestatus == 0) {
+    uView.pixel(snakeHeadPosX, snakeHeadPosY);
+    changeValue(&snakeHeadPointer, 1, bufferSize - 1);
+    setMovement(snakeHeadPointer, snakeHeadDir);
+  } else {
+    uView.pixel(snakeHeadPosX, snakeHeadPosY, BLACK, NORM);
+  }
+  // draw apple
+  appleColor = !appleColor;
+  uView.pixel(applePosX, applePosY, appleColor, NORM);
+  uView.display();
+  // slack of the rest of the needed tick time
+  timeLeftInTick = tickDelay - (millis() - startTime);
+  delay(max(timeLeftInTick, 0));
+  startTime = millis();
+  // check if player wants to join game
+  if(!isPlayer && buttonDir > 0) {
+    buttonDir = 0;
+    isPlayer = true;
+    initGame();
+  }
+}
+
+void showLooserAnimation() {
+  // when user presses some button, stop animation. max delay is ~120 ms, which feels instant.
+  for(byte x = 0; x < 5; x++) {
+    delay(userDelay / 10);
+    if(buttonDir > 0) return;
+  }
+  uView.rectFill(4, 16, 56, 16, BLACK, NORM);
+  uView.setFontType(1);
+  uView.setCursor(6,18);
+  uView.print("LOOSER");
+  uView.display();
+  for(byte x = 0; x < 16; x++) {
+    delay(10);
+    uView.rect(max(3 - x, 0), 15 - x, min(58 + x * 2, 64), 18 + x * 2);
+    uView.display();
+  }
+  if(buttonDir > 0) return;
+  delay(100);
+  if(buttonDir > 0) return;
+  for(byte x = 0; x < 16; x++) {
+    delay(10);
+    uView.rect(max(3 - x, 0), 15 - x, min(58 + x * 2, 64), 18 + x * 2, BLACK, NORM);
+    uView.display();
+  }
+  for(byte x = 0; x < 5; x++) {
+    delay(userDelay / 10);
+    if(buttonDir > 0) return;
+  }
 }
 
 void checkCollision() {
@@ -202,19 +231,17 @@ void changeValue(int *target, int value, int maximum) {
   if(*target < 0) *target += (maximum + 1);
 }
 
-void buttonIsPressed() {
+void buttonLeft() {
   if(millis() - buttonTime > 50) { // lock keys for 50 ms
     buttonTime = millis();
-    buttonPortDataTemp = PIND;
-    buttonPortData = 0;
-    if(buttonPortDataTemp >> 2 & 0x01 == 0x01) buttonPortData = 1;
-    if(buttonPortDataTemp >> 3 & 0x01 == 0x01) buttonPortData = 2;
-    // sometimes the time from start of interrupt to setting the variable is enough to get no data (button bouncing)
-    while(buttonPortData == 0) {
-      buttonPortDataTemp = PIND;
-      if(buttonPortDataTemp >> 2 & 0x01 == 0x01) buttonPortData = 1;
-      if(buttonPortDataTemp >> 3 & 0x01 == 0x01) buttonPortData = 2;
-    }
+    buttonDir = 1;
+  }
+}
+
+void buttonRight() {
+  if(millis() - buttonTime > 50) { // lock keys for 50 ms
+    buttonTime = millis();
+    buttonDir = 2;
   }
 }
 
