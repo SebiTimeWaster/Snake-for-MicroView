@@ -42,8 +42,9 @@ int           snakeTailPointer           = 0;
 int           applePosX                  = 0;
 int           applePosY                  = 0;
 int           applePoints                = 0;
+int           applesCollected            = 0;
 byte          snakeMovements[bufferSize] = {0};
-byte          gamestatus                 = 0; // 0=running, 1=lost (collision), 2=won (very unlikely)
+bool          gameIsRunning              = true;
 bool          isPlayer                   = false;
 unsigned long startTime                  = 0;
 long          timeLeftInTick             = 0;
@@ -74,9 +75,9 @@ void setup() {
 void loop() {
   // decide what to do (what status the game is in)
   // game loop
-  if(gamestatus == 0) tick();
+  if(gameIsRunning) tick();
   // user lost
-  if(gamestatus == 1) {
+  else {
     // show looser screen
     aniCounter++;
     showLooserAnimation();
@@ -90,12 +91,8 @@ void loop() {
     }
     // restart game
     aniCounter = 0;
-    gamestatus = 0;
+    gameIsRunning = true;
     initGame();
-  }
-  // user won
-  if(gamestatus == 2) {
-    // cannot be, cheater!
   }
 }
 
@@ -112,6 +109,7 @@ void initGame() {
   // set random apple position
   setNewApple();
   applePoints = 0;
+  applesCollected = 0;
   // draw initial game screen
   pixel(4, 4);
   pixel(5, 4);
@@ -153,7 +151,7 @@ void tick() {
   // move and draw head and check for collisions
   moveInDirection(&snakeHeadPosX, &snakeHeadPosY, snakeHeadDir);
   checkCollision();
-  if(gamestatus == 0) {
+  if(gameIsRunning) {
     pixel(snakeHeadPosX, snakeHeadPosY);
     changeValue(&snakeHeadPointer, 1, bufferSize - 1);
     setMovement(snakeHeadPointer, snakeHeadDir);
@@ -182,14 +180,17 @@ void showLooserAnimation() {
     delay(userDelay / 10);
     if(aniCounter > 1 && buttonDir > 0) return;
   }
-  uView.rectFill(4, 16, 56, 16, BLACK, NORM);
+  uView.rectFill(0, 16, 64, 16, BLACK, NORM);
   uView.setFontType(1);
-  uView.setCursor(6,18);
-  uView.print("LOOSER");
+  uView.setCursor(2, 18);
+  if(applesCollected < 100) uView.print("0");
+  if(applesCollected < 10) uView.print("0");
+  uView.print(applesCollected);
+  uView.print(" Pts");
   uView.display();
   for(byte x = 0; x < 16; x++) {
     delay(10);
-    uView.rect(max(3 - x, 0), 15 - x, min(58 + x * 2, 64), 18 + x * 2);
+    uView.rect(0, 15 - x, 64, 18 + x * 2);
     uView.display();
   }
   if(aniCounter == 1) buttonDir = 0;
@@ -198,7 +199,7 @@ void showLooserAnimation() {
   if(buttonDir > 0) return;
   for(byte x = 0; x < 16; x++) {
     delay(10);
-    uView.rect(max(3 - x, 0), 15 - x, min(58 + x * 2, 64), 18 + x * 2, BLACK, NORM);
+    uView.rect(0, 15 - x, 64, 18 + x * 2, BLACK, NORM);
     uView.display();
   }
   for(byte x = 0; x < 5; x++) {
@@ -211,9 +212,10 @@ void checkCollision() {
   if(snakeHeadPosX == applePosX && snakeHeadPosY == applePosY) {
     applePoints += pointsPerApple;
     setNewApple();
+    applesCollected++;
     return;
   }
-  if(getPixel(snakeHeadPosX, snakeHeadPosY)) gamestatus = 1;
+  if(getPixel(snakeHeadPosX, snakeHeadPosY)) gameIsRunning = false;
 }
 
 void autoPilot() {
