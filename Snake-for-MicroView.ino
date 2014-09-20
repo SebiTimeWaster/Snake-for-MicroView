@@ -8,14 +8,18 @@
 #define hardGamePointsPerApple     5 // how much longer the snake will become per apple
 #define hardGameDoublePixels   false // if pixels should be shown double in size; this somewhat counteracts the purpose of having an arbitrary screen size,
                                      // but implementing an interpolation algorythm would be slow and would produce bad visual results
+#define hardGameSpeedIncrease      1 // how much the speed increases per eaten apple in ms
+#define hardGameMinTickDelay      75 // the minimum tick delay to cap speed increase, the ATmega328P is capable of such high speeds that it is unplayable
 // EASY GAME
 #define easyGameScreenSizeX       32
 #define easyGameScreenSizeY       24
 #define easyGameBufferSize       165
 #define easyGamePointsPerApple     3
 #define easyGameDoublePixels    true
+#define easyGameSpeedIncrease      0
+#define easyGameMinTickDelay      75
 // the rest
-#define tickDelay                125 // game tick in ms, 125 ms = 8 fps (more or less)
+#define gameTickDelay            125 // game tick in ms, 125 ms = 8 fps (more or less)
 #define userDelay               2000 // general delay for animations and user interaction
 #define keyLock                   25 // how long to lock the keys after key press to avoid bouncing
 
@@ -29,11 +33,14 @@
 
 // global vars
 uint8_t      *screenBuffer;
+byte          tickDelay                          = 0;
+byte          minTickDelay                       = 0;
 byte          screenSizeX                        = 0;
 byte          screenSizeY                        = 0;
 int           bufferSize                         = 0;
 byte          pointsPerApple                     = 0;
 bool          doublePixels                       = false;
+byte          speedIncrease                      = 0;
 int           snakeHeadPosX                      = 0;
 int           snakeHeadPosY                      = 0;
 int           snakeHeadDir                       = 0;
@@ -110,6 +117,7 @@ void loop() {
 }
 
 void initGame() {
+  tickDelay = gameTickDelay;
   // clear screen
   uView.clear(PAGE);
   // set initial position of snake
@@ -200,12 +208,16 @@ void setGameMode(bool hardGame) {
     bufferSize     = hardGameBufferSize;
     pointsPerApple = hardGamePointsPerApple;
     doublePixels   = hardGameDoublePixels;
+    speedIncrease  = hardGameSpeedIncrease;
+    minTickDelay   = hardGameMinTickDelay;
   } else {
     screenSizeX    = easyGameScreenSizeX;
     screenSizeY    = easyGameScreenSizeY;
     bufferSize     = easyGameBufferSize;
     pointsPerApple = easyGamePointsPerApple;
     doublePixels   = easyGameDoublePixels;
+    speedIncrease  = easyGameSpeedIncrease;
+    minTickDelay   = easyGameMinTickDelay;
   }
 }
 
@@ -257,6 +269,7 @@ void checkCollision() {
     applePoints += pointsPerApple;
     setNewApple();
     applesCollected++;
+    if(tickDelay >= speedIncrease && tickDelay > minTickDelay) tickDelay -= speedIncrease;
     return;
   }
   // check if there is a bright pixel on snakeHeadPos (collision)
