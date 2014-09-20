@@ -1,56 +1,60 @@
-
-/*
- * set this to true to have a bad time (or a good time, depends on your definition) ^^
- */
-#define doItHard false
-
-
-/*
- * Do not change anything below here unless you know what you do
- */
 #include <MicroView.h>
 
 // compiler directives defining game parameters
-#if doItHard
-  #define screenSizeX        64
-  #define screenSizeY        48
-  #define bufferSize        713 // (screenSizeX - 2) * (screenSizeY - 2) / 4
-  #define pointsPerApple      5 // how much longer the snake will become per apple
-  #define doublePixels    false
-#else
-  #define screenSizeX        32
-  #define screenSizeY        24
-  #define bufferSize        165 // (screenSizeX - 2) * (screenSizeY - 2) / 4
-  #define pointsPerApple      3 // how much longer the snake will become per apple
-  #define doublePixels     true
-#endif
-#define tickDelay           125 // game tick in ms, 125 ms = 8 fps (more or less)
-#define userDelay          2000 // general delay for animations and user interaction
-#define keyLock              25 // how long to lock the keys after key press to avoid bouncing
+// HARD GAME
+#define hardGameScreenSizeX       64 // screen width in pixels
+#define hardGameScreenSizeY       48 // screen height in pixels
+#define hardGameBufferSize       713 // (screenSizeX - 2) * (screenSizeY - 2) / 4
+#define hardGamePointsPerApple     5 // how much longer the snake will become per apple
+#define hardGameDoublePixels   false // if pixels should be shown double in size; this somewhat counteracts the purpose of having an arbitrary screen size,
+                                     // but implementing an interpolation algorythm would be slow and would produce bad visual results
+// EASY GAME
+#define easyGameScreenSizeX       32
+#define easyGameScreenSizeY       24
+#define easyGameBufferSize       165
+#define easyGamePointsPerApple     3
+#define easyGameDoublePixels    true
+// the rest
+#define tickDelay                125 // game tick in ms, 125 ms = 8 fps (more or less)
+#define userDelay               2000 // general delay for animations and user interaction
+#define keyLock                   25 // how long to lock the keys after key press to avoid bouncing
+
+
+/**
+ *  --------------------------------------------------------------
+ *  Do not change anything below here unless you know what you do!
+ *  --------------------------------------------------------------
+ */
+
 
 // global vars
 uint8_t      *screenBuffer;
-int           snakeHeadPosX              = 0;
-int           snakeHeadPosY              = 0;
-int           snakeHeadDir               = 0;
-int           snakeHeadPointer           = 0;
-int           snakeTailPosX              = 0;
-int           snakeTailPosY              = 0;
-int           snakeTailDir               = 0;
-int           snakeTailPointer           = 0;
-int           applePosX                  = 0;
-int           applePosY                  = 0;
-int           applePoints                = 0;
-int           applesCollected            = 0;
-byte          snakeMovements[bufferSize] = {0};
-bool          gameIsRunning              = true;
-bool          isPlayer                   = false;
-unsigned long startTime                  = 0;
-long          timeLeftInTick             = 0;
-uint8_t       appleColor                 = BLACK;
-unsigned long buttonTime                 = 0;
-volatile byte buttonDir                  = 0;
-byte          aniCounter                 = 0;
+byte          screenSizeX                        = 0;
+byte          screenSizeY                        = 0;
+int           bufferSize                         = 0;
+byte          pointsPerApple                     = 0;
+bool          doublePixels                       = false;
+int           snakeHeadPosX                      = 0;
+int           snakeHeadPosY                      = 0;
+int           snakeHeadDir                       = 0;
+int           snakeHeadPointer                   = 0;
+int           snakeTailPosX                      = 0;
+int           snakeTailPosY                      = 0;
+int           snakeTailDir                       = 0;
+int           snakeTailPointer                   = 0;
+int           applePosX                          = 0;
+int           applePosY                          = 0;
+int           applePoints                        = 0;
+int           applesCollected                    = 0;
+byte          snakeMovements[hardGameBufferSize] = {0};
+bool          gameIsRunning                      = true;
+bool          isPlayer                           = false;
+unsigned long startTime                          = 0;
+long          timeLeftInTick                     = 0;
+uint8_t       appleColor                         = BLACK;
+unsigned long buttonTime                         = 0;
+volatile byte buttonDir                          = 0;
+byte          aniCounter                         = 0;
 
 void setup() {
   // init random generator
@@ -67,6 +71,8 @@ void setup() {
   // attach interrupt for button presses
   attachInterrupt(0, buttonRight, FALLING);
   attachInterrupt(1, buttonLeft, FALLING);
+  // set game parameters
+  setGameMode(true);
   // init game
   initGame();
 }
@@ -81,10 +87,18 @@ void loop() {
     aniCounter++;
     showLoserAnimation();
     // user wants to play
-    if(buttonDir > 0) isPlayer = true;
-    else if(isPlayer) {
+    if(buttonDir > 0) {
+      isPlayer = true;
+      // set game parameters
+      if(buttonDir == 1) setGameMode(true);
+      if(buttonDir == 2) setGameMode(false);
+    } else if(isPlayer) {
       // when animation showed 10 times user does not want to play anymore
-      if(aniCounter == 10) isPlayer = false;
+      if(aniCounter == 10) {
+        isPlayer = false;
+        // set game parameters
+        setGameMode(true);
+      }
       // if player show animation again
       else return;
     }
@@ -96,6 +110,7 @@ void loop() {
 }
 
 void initGame() {
+  // clear screen
   uView.clear(PAGE);
   // set initial position of snake
   snakeHeadPosX = 5;
@@ -168,9 +183,29 @@ void tick() {
   startTime = millis();
   // check if player wants to join game
   if(!isPlayer && buttonDir > 0) {
+    // set game parameters
+    if(buttonDir == 1) setGameMode(true);
+    if(buttonDir == 2) setGameMode(false);
     buttonDir = 0;
     isPlayer = true;
     initGame();
+  }
+}
+
+void setGameMode(bool hardGame) {
+  // set game parameters according to users wish (i.e. hard or easy game)
+  if(hardGame) {
+    screenSizeX    = hardGameScreenSizeX;
+    screenSizeY    = hardGameScreenSizeY;
+    bufferSize     = hardGameBufferSize;
+    pointsPerApple = hardGamePointsPerApple;
+    doublePixels   = hardGameDoublePixels;
+  } else {
+    screenSizeX    = easyGameScreenSizeX;
+    screenSizeY    = easyGameScreenSizeY;
+    bufferSize     = easyGameBufferSize;
+    pointsPerApple = easyGamePointsPerApple;
+    doublePixels   = easyGameDoublePixels;
   }
 }
 
