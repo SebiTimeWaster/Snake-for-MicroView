@@ -1,26 +1,26 @@
 /**
- *  The MIT License (MIT)
- *
- *  "Snake for MicroView" v1.0 Copyright (c) 2014 SebiTimeWaster
- *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
- */
+  *  The MIT License (MIT)
+  *
+  *  "Snake for MicroView" v1.0 Copyright (c) 2014 SebiTimeWaster
+  *
+  *  Permission is hereby granted, free of charge, to any person obtaining a copy
+  *  of this software and associated documentation files (the "Software"), to deal
+  *  in the Software without restriction, including without limitation the rights
+  *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  *  copies of the Software, and to permit persons to whom the Software is
+  *  furnished to do so, subject to the following conditions:
+  *
+  *  The above copyright notice and this permission notice shall be included in all
+  *  copies or substantial portions of the Software.
+  *
+  *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  *  SOFTWARE.
+  */
 
 
 // compiler directives defining game parameters
@@ -87,6 +87,13 @@ uint8_t       appleColor                         = BLACK;
 unsigned long buttonTime                         = 0;
 volatile byte buttonDir                          = 0;
 byte          aniCounter                         = 0;
+byte          freeLines[64]                      = {0};
+byte          amountOfFreeLines                  = 0;
+byte          freeRows[6]                        = {0};
+byte          amountOfFreeRows                   = 0;
+byte          randomX                            = 0;
+byte          randomYByte                        = 0;
+byte          randomYBit                         = 0;
 
 void setup() {
   // init random generator
@@ -292,6 +299,8 @@ void checkCollision() {
   // if applePos and snakeHeadPos are the same user ate apple
   if(snakeHeadPosX == applePosX && snakeHeadPosY == applePosY) {
     applePoints += pointsPerApple;
+    // workaround to avoid apple taking same spot again when apple blinking phase is black
+    pixel(applePosX, applePosY);
     setNewApple();
     applesCollected++;
     if(tickDelay >= speedIncrease && tickDelay > minTickDelay) tickDelay -= speedIncrease;
@@ -320,11 +329,44 @@ void autoPilot() {
 
 void setNewApple() {
   // find an empty spot for the apple
-  // TODO: should be optimized! at the moment this will be incredibly slow in a late state of the game
+  /**  at first this looks like overkill, but as the playing field gets more and more filled it gets increasingly difficult 
+    *  to find an empty spot just by random chance, in the end it can take more than 600 ms to find one.
+    *  this algorythm instead finds a spot with a consistent time of under 2 ms, no matter how crowded the screen is.
+    */
+  // check all lines if there are pixels free
+  amountOfFreeLines = 0;
+  for(byte x = 1; x < 63; x++) {
+    if(screenBuffer[x] < 255 ||
+      screenBuffer[x + 64] < 255 ||
+      screenBuffer[x + 128] < 255 ||
+      screenBuffer[x + 192] < 255 ||
+      screenBuffer[x + 256] < 255 ||
+      screenBuffer[x + 320] < 255) {
+      freeLines[amountOfFreeLines] = x;
+      amountOfFreeLines++;
+    }
+  }
+  // choose one line where pixels are free
+  randomX = freeLines[random(amountOfFreeLines)];
+  // check all rows in this line if there are pixels free
+  amountOfFreeRows = 0;
+  for(byte x = 1; x < 6; x++) {
+    if(screenBuffer[randomX + x * 64] < 255) {
+      freeRows[amountOfFreeRows] = x;
+      amountOfFreeRows++;
+    }
+  }
+  // choose one row where pixels are free
+  randomYByte = freeRows[random(amountOfFreeRows)];
+  // find a free bit in this row
   do {
-    applePosX = random(1, screenSizeX - 1);
-    applePosY = random(1, screenSizeY - 1);
-  } while(getPixel(applePosX, applePosY));
+    if(randomYByte == 0) randomYBit = random(1, 8);
+    else if(randomYByte == 3) randomYBit = random(7);
+    else randomYBit = random(8);
+  } while(getPixel(randomX, randomYByte * 8 + randomYBit));
+  // set new apple coordinates
+  applePosX = randomX;
+  applePosY = randomYByte * 8 + randomYBit;
 }
 
 void rect(byte x, byte y, byte width, byte height) {
