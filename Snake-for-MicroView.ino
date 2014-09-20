@@ -15,19 +15,18 @@
   #define screenSizeX        64
   #define screenSizeY        48
   #define bufferSize        713 // (screenSizeX - 2) * (screenSizeY - 2) / 4
-  #define maxBufferLength  2850 // (screenSizeX - 2) * (screenSizeY - 2) - 2
   #define pointsPerApple      5 // how much longer the snake will become per apple
   #define doublePixels    false
 #else
   #define screenSizeX        32
   #define screenSizeY        24
   #define bufferSize        165 // (screenSizeX - 2) * (screenSizeY - 2) / 4
-  #define maxBufferLength   658 // (screenSizeX - 2) * (screenSizeY - 2) - 2
   #define pointsPerApple      3 // how much longer the snake will become per apple
   #define doublePixels     true
 #endif
-#define tickDelay           125 // game tick in ms = 8 fps (more or less)
-#define userDelay          1000 // how long to screens before / after user interaction
+#define tickDelay           125 // game tick in ms, 125 ms = 8 fps (more or less)
+#define userDelay          2000 // general delay for animations and user interaction
+#define keyLock              25 // how long to lock the keys after key press to avoid bouncing
 
 // global vars
 uint8_t      *screenBuffer;
@@ -80,7 +79,7 @@ void loop() {
   else {
     // show looser screen
     aniCounter++;
-    showLooserAnimation();
+    showLoserAnimation();
     // user wants to play
     if(buttonDir > 0) isPlayer = true;
     else if(isPlayer) {
@@ -115,7 +114,6 @@ void initGame() {
   pixel(5, 4);
   pixel(applePosX, applePosY);
   rect(0, 0, screenSizeX, screenSizeY);
-  uView.display();
   if(isPlayer) {
     // give time without movement so user can adjust to new position
     for(byte x = 0; x < userDelay / tickDelay; x++) {
@@ -135,13 +133,13 @@ void tick() {
   // get last executed movements
   snakeHeadDir = getMovement(snakeHeadPointer);
   snakeTailDir = getMovement(snakeTailPointer);
-  // move and draw tail
+  // move and draw tail if no applepoints left
   if(applePoints == 0) {
     pixel(snakeTailPosX, snakeTailPosY, BLACK);
     moveInDirection(&snakeTailPosX, &snakeTailPosY, snakeTailDir);
     changeValue(&snakeTailPointer, 1, bufferSize - 1);
   } else applePoints--;
-  // move snake
+  // set new snake head direction
   if(!isPlayer) autoPilot();
   else if(buttonDir > 0) {
     if(buttonDir == 2) changeValue(&snakeHeadDir, 1, 3);
@@ -156,13 +154,15 @@ void tick() {
     changeValue(&snakeHeadPointer, 1, bufferSize - 1);
     setMovement(snakeHeadPointer, snakeHeadDir);
   } else {
+    // if collision paint head black to visualize crash
     pixel(snakeHeadPosX, snakeHeadPosY, BLACK);
   }
-  // draw apple
+  // draw apple (blinks with 1 hertz = tickDelay * 2)
   appleColor = !appleColor;
   pixel(applePosX, applePosY, appleColor);
+  // draw screen
   uView.display();
-  // slack of the rest of the needed tick time
+  // slack of the rest of the needed tick time to assure correct fps
   timeLeftInTick = tickDelay - (millis() - startTime);
   delay(max(timeLeftInTick, 0));
   startTime = millis();
@@ -174,12 +174,15 @@ void tick() {
   }
 }
 
-void showLooserAnimation() {
-  // when user presses some button, stop animation. max delay is ~120 ms, which feels instant.
+void showLoserAnimation() {
+  // when user presses some button, stop animation no matter where. max delay is ~120 ms, which feels instant.
+  // wait half an userDelay (in 10th of a userDelay steps)
   for(byte x = 0; x < 5; x++) {
     delay(userDelay / 10);
+    // do not break delay on first round, so user can see points before proceeding
     if(aniCounter > 1 && buttonDir > 0) return;
   }
+  // draw points
   uView.rectFill(0, 16, 64, 16, BLACK, NORM);
   uView.setFontType(1);
   uView.setCursor(2, 18);
@@ -188,20 +191,25 @@ void showLooserAnimation() {
   uView.print(applesCollected);
   uView.print(" Pts");
   uView.display();
+  // show screen fill animation (~ 192 ms)
   for(byte x = 0; x < 16; x++) {
     delay(10);
     uView.rect(0, 15 - x, 64, 18 + x * 2);
     uView.display();
   }
+  // on first round delete user input assuming he pressed by accident while playing
   if(aniCounter == 1) buttonDir = 0;
   if(buttonDir > 0) return;
+  // wait a bit in between anímation
   delay(100);
   if(buttonDir > 0) return;
+  // show screen fill animation (~ 192 ms)
   for(byte x = 0; x < 16; x++) {
     delay(10);
     uView.rect(0, 15 - x, 64, 18 + x * 2, BLACK, NORM);
     uView.display();
   }
+  // wait half an userDelay (in 10th of a userDelay steps)
   for(byte x = 0; x < 5; x++) {
     delay(userDelay / 10);
     if(buttonDir > 0) return;
@@ -209,16 +217,19 @@ void showLooserAnimation() {
 }
 
 void checkCollision() {
+  // if applePos and snakeHeadPos are the same user ate apple
   if(snakeHeadPosX == applePosX && snakeHeadPosY == applePosY) {
     applePoints += pointsPerApple;
     setNewApple();
     applesCollected++;
     return;
   }
+  // check if there is a bright pixel on snakeHeadPos (collision)
   if(getPixel(snakeHeadPosX, snakeHeadPosY)) gameIsRunning = false;
 }
 
 void autoPilot() {
+  // a simple state machine, goes greedy after the apple and will collide with itself
   if(snakeHeadDir == 0 && applePosX <= snakeHeadPosX) {
     if(applePosY >= snakeHeadPosY) changeValue(&snakeHeadDir, 1, 3);
     else changeValue(&snakeHeadDir, -1, 3);
@@ -235,7 +246,8 @@ void autoPilot() {
 }
 
 void setNewApple() {
-  // TODO: should be optimized!
+  // find an empty spot for the apple
+  // TODO: should be optimized! at the moment this will be incredibly slow in a late state of the game
   do {
     applePosX = random(1, screenSizeX - 1);
     applePosY = random(1, screenSizeY - 1);
@@ -243,10 +255,12 @@ void setNewApple() {
 }
 
 void rect(byte x, byte y, byte width, byte height) {
+  // call overload
   rect(x, y, width, height, WHITE);
 }
 
 void rect(byte x, byte y, byte width, byte height, uint8_t color) {
+  // draw a rect, if doublePixels draw two
   if(doublePixels) {
     uView.rect(x * 2, y * 2, width * 2, height * 2, color, NORM);
     uView.rect(x * 2 + 1, y * 2 + 1, width * 2 - 2, height * 2 - 2, color, NORM);
@@ -256,15 +270,18 @@ void rect(byte x, byte y, byte width, byte height, uint8_t color) {
 }
 
 void pixel(byte x, byte y) {
+  // call overload
   pixel(x, y, WHITE);
 }
 
 void pixel(byte x, byte y, uint8_t color) {
+  // draw a pixel, if doublePixels draw a two by two pixel
   if(doublePixels) uView.rect(x * 2, y * 2, 2, 2, color, NORM);
   else uView.pixel(x, y, color, NORM);
 }
 
 void moveInDirection(int *targetX, int *targetY, int dir) {
+  // move snake dependent of direction given
   if(dir == 0) *targetX += 1;
   if(dir == 1) *targetY += 1;
   if(dir == 2) *targetX -= 1;
@@ -272,38 +289,44 @@ void moveInDirection(int *targetX, int *targetY, int dir) {
 }
 
 void changeValue(int *target, int value, int maximum) {
+  // changes target by value while rolling over when reaching maximum
   *target += value;
   if(*target > maximum) *target -= (maximum + 1);
   if(*target < 0) *target += (maximum + 1);
 }
 
 void buttonLeft() {
-  if(millis() - buttonTime > 50) { // lock keys for 50 ms
+  // left button was pressed, lock keys for keyLock ms
+  if(millis() - buttonTime > keyLock) {
     buttonTime = millis();
     buttonDir = 1;
   }
 }
 
 void buttonRight() {
-  if(millis() - buttonTime > 50) { // lock keys for 50 ms
+  // right button was pressed, lock keys for keyLock ms
+  if(millis() - buttonTime > keyLock) {
     buttonTime = millis();
     buttonDir = 2;
   }
 }
 
 byte getMovement(int pos) {
+  // read one movement out of the movement buffer
   return snakeMovements[pos / 4] >> pos % 4 * 2 & 3;
 }
 
 void setMovement(int pos, byte movement) {
+  // write one movement into the movement buffer
   snakeMovements[pos / 4] = (snakeMovements[pos / 4] & (~(3 << (pos % 4 * 2)))) | (movement << (pos % 4 * 2));
 }
 
 byte getPixel(int x, int y) {
+  // get pixel value out of uView library's internal screen buffer
   if(doublePixels) {
     x *= 2;
     y *= 2;
   }
-  return (byte)screenBuffer[x + y / 8 * 64] >> (y - y / 8 * 8) & 0x01;
+  return screenBuffer[x + y / 8 * 64] >> (y - y / 8 * 8) & 0x01;
 }
 
