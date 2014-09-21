@@ -94,6 +94,7 @@ byte          amountOfFreeRows                   = 0;
 byte          randomX                            = 0;
 byte          randomYByte                        = 0;
 byte          randomYBit                         = 0;
+bool          pixelValue                         = false;
 
 void setup() {
   // init random generator
@@ -117,7 +118,6 @@ void setup() {
 }
 
 void loop() {
-  // decide what to do (what status the game is in)
   // game loop
   if(gameIsRunning) tick();
   // user lost
@@ -350,7 +350,7 @@ void setNewApple() {
   randomX = freeLines[random(amountOfFreeLines)];
   // check all rows in this line if there are pixels free
   amountOfFreeRows = 0;
-  for(byte x = 1; x < 6; x++) {
+  for(byte x = 0; x < 6; x++) {
     if(screenBuffer[randomX + x * 64] < 255) {
       freeRows[amountOfFreeRows] = x;
       amountOfFreeRows++;
@@ -358,15 +358,19 @@ void setNewApple() {
   }
   // choose one row where pixels are free
   randomYByte = freeRows[random(amountOfFreeRows)];
-  // find a free bit in this row
+  // find a free bit in this row's byte
   do {
-    if(randomYByte == 0) randomYBit = random(1, 8);
-    else if(randomYByte == 3) randomYBit = random(7);
-    else randomYBit = random(8);
-  } while(getPixel(randomX, randomYByte * 8 + randomYBit));
+    randomYBit = random(8);
+    if(doublePixels) pixelValue = getPixel(randomX / 2, (randomYByte * 8 + randomYBit) / 2);
+    else pixelValue = getPixel(randomX, randomYByte * 8 + randomYBit);
+  } while(pixelValue);
   // set new apple coordinates
   applePosX = randomX;
   applePosY = randomYByte * 8 + randomYBit;
+  if(doublePixels) {
+    applePosX /= 2;
+    applePosY /= 2;
+  }
 }
 
 void rect(byte x, byte y, byte width, byte height) {
@@ -436,7 +440,7 @@ void setMovement(int pos, byte movement) {
   snakeMovements[pos / 4] = (snakeMovements[pos / 4] & (~(3 << (pos % 4 * 2)))) | (movement << (pos % 4 * 2));
 }
 
-byte getPixel(int x, int y) {
+bool getPixel(int x, int y) {
   // get pixel value out of uView library's internal screen buffer
   if(doublePixels) {
     x *= 2;
